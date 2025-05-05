@@ -1,10 +1,13 @@
-# -*- coding: utf-8 -*-
 """
 Created on Mon Mar 17 12:52:47 2025
 
 @author: rdash
 """
-
+#%% This code can be used to a) perform molecular dyanamics of a ligand (pdb format file), b) molecular dynamics run of the receptor in pdb format c) form a complex of equilibrated ligand and receptor and d) perform molecular dynamics run of complex
+#%% Remember to have the Amber14 forcefield folder downlaoded in the same directory as this script.
+#%% Adjust the timestep, number of steps and sample interval to set the simulation time (25 ns in this code).
+#%% This code also computes various energy terms, Radius of gyration, end to end distance and Root Mean Square DEviation from the intial structure (ligand only in complex). 
+#%% For running in high performance clusters, slight tweaking might be needed such as not importin IPython. 
 
 #%% Import all libraries
 
@@ -37,30 +40,13 @@ from openmm import unit
 from simtk.openmm import LangevinIntegrator, LocalEnergyMinimizer
 from simtk.openmm.app import Simulation
 
-
-#%% Remove exisitng temporary files
-
-files_to_remove = [
-    'initial_complex.pdb', 'initial_ligand.pdb', 'initial_receptor.pdb',
-    'optimized_ligand.pdb', 'optimized_receptor.pdb', 'optimized_complex.pdb',
-    'minimized_ligand.pdb', 'minimized_receptor.pdb','minimized_complex.pdb',
-    'NVT_ligand','NVT_receptor','NVT_complex',
-    'ligand_analysis.xlsx','receptor_analysis.xlsx','complex_analysis.xlsx',
-    'temp_sample.pdb','minimized_ligand_unconstrained.pdb'
-]
-
-for file in files_to_remove:
-    try:
-        os.remove(file)
-    except FileNotFoundError:
-        pass
     
 #%% Enter the ligand file, the receptor file, the forcefield file and the water model files
 
-ligand_file = "C:/Users/rdash/Desktop/Research/Molecular Mechanics/molecular mechanics/Ligand_files/BMP2-KEP.pdb"
-receptor_file = "C:/Users/rdash/Desktop/Research/Molecular Mechanics/molecular mechanics/Receptor_files/acvr2b.pdb"
-forcefield_file = "C:/Users/rdash/Desktop/Research/Molecular Mechanics/molecular mechanics/Forcefield_files/amber14-all.xml"
-water_model = "C:/Users/rdash/Desktop/Research/Molecular Mechanics/molecular mechanics/Forcefield_files/amber14/tip3pfb.xml"
+ligand_file = "Ligand.pdb"
+receptor_file = "Receptor.pdb"
+forcefield_file = "Forcefield_files/amber14-all.xml"
+water_model = "Forcefield_files/amber14/tip3pfb.xml"
 
 #%% Fix the PDB files
 
@@ -95,10 +81,10 @@ temperature = 298.0 * unit.kelvin
 pressure = 1.0 * unit.atmospheres
 collision_rate = 1.0 / unit.picoseconds
 timestep = 1.0 * unit.femtoseconds  
-nvt_steps = 5 
+nvt_steps = 2500000
 npt_steps = 100000000
 max_Iter = 1000
-sample_interval = 1
+sample_interval = 2500
 n_samples = nvt_steps//sample_interval
 
 #%% create systems
@@ -125,14 +111,13 @@ ligand_modeller.positions = ligand_positions_randomized * unit.nanometers
 ligand_modeller.addSolvent(forcefield, model='tip3p', 
                         ionicStrength=0.15*unit.molar,
                         neutralize=True,
-                        padding=1.0*unit.nanometer,
-       #                 boxSize = box_size
+                        padding=1.0*unit.nanometer
                        )
 
 
 # incorporate forcefield in the ligand system
 ligand_system = forcefield.createSystem(ligand_modeller.topology, nonbondedMethod=LJPME,
-                                    nonbondedCutoff= 1*unit.nanometer,removeCMMotion=True
+                                    nonbondedCutoff= 1*unit.nanometer,removeCMMotion=True,constraints=AllBonds
                                     )
 
 # prepare receptor system
@@ -141,13 +126,12 @@ receptor_modeller = Modeller(receptor_pdb.topology, receptor_pdb.positions)
 receptor_modeller.addSolvent(forcefield, model='tip3p', 
                         ionicStrength=0.15*unit.molar,
                         neutralize=True,
-                        padding=1.0*unit.nanometer,
-       #                 boxSize = box_size
+                        padding=1.0*unit.nanometer
                        )
 
 # incorporate forcefiled in the receptor system
 receptor_system = forcefield.createSystem(receptor_modeller.topology, nonbondedMethod=LJPME,
-                                    nonbondedCutoff= 1*unit.nanometer,removeCMMotion=True
+                                    nonbondedCutoff= 1*unit.nanometer,removeCMMotion=True,constraints=AllBonds
                                     )
 
 #%% Minimize ligand with constrained bonds
@@ -169,23 +153,6 @@ ligand_positions = ligand_simulation.context.getState(getPositions=True).getPosi
 with open(temp_minimized_ligand_file, "w") as output:
     PDBFile.writeFile(ligand_modeller.topology, ligand_positions,output)
     
-
-#%% RMSD and Rg calculation
-
-u1 = mda.Universe("initial_ligand.pdb")  
-u2 = mda.Universe("minimized_ligand.pdb")  
-
-# select only alpha carbons
-ca1 = u1.select_atoms("name CA")  
-ca2 = u2.select_atoms("name CA")  
-
-if len(ca1) != len(ca2):
-    raise ValueError("The two structures have different numbers of alpha carbons!")
-
-# align the two structures and calculate RMSD
-alignment = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-rmsd_value_1 = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-
 def radius_of_gyration(atoms):
     """Calculate the radius of gyration for a set of atoms."""
     positions = atoms.positions
@@ -194,9 +161,6 @@ def radius_of_gyration(atoms):
     rg = np.sqrt(np.mean(squared_distances))
     return rg
 
-# Calculate radius of gyration for both structures
-rg1 = radius_of_gyration(ca1)
-rg2 = radius_of_gyration(ca2)
 
 #%% Minimize ligand again with NO bond constraints
 
@@ -215,33 +179,6 @@ temp_minimized_ligand_file_unconstrained = f"minimized_ligand_unconstrained.pdb"
 ligand_positions_unconstrained = ligand_simulation_unconstrained.context.getState(getPositions=True).getPositions()
 with open(temp_minimized_ligand_file_unconstrained, "w") as output:
     PDBFile.writeFile(ligand_modeller.topology, ligand_positions_unconstrained, output)
-
-#%% RMSD and Rg calculation
-
-u1 = mda.Universe("initial_ligand.pdb")  
-u2 = mda.Universe("minimized_ligand_unconstrained.pdb")  
-
-# select only alpha carbons
-ca1 = u1.select_atoms("name CA")  
-ca2 = u2.select_atoms("name CA")  
-
-if len(ca1) != len(ca2):
-    raise ValueError("The two structures have different numbers of alpha carbons!")
-
-# align the two structures and calculate RMSD
-alignment = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-rmsd_value_1 = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-
-
-def radius_of_gyration(atoms):
-    """Calculate the radius of gyration for a set of atoms."""
-    positions = atoms.positions
-    center_of_mass = atoms.center_of_mass()
-    squared_distances = np.sum((positions - center_of_mass) ** 2, axis=1)
-    rg = np.sqrt(np.mean(squared_distances))
-    return rg
-
-rg3 = radius_of_gyration(ca2)
 
 #%% NVT run of ligand system
 
@@ -361,36 +298,7 @@ temp_minimized_receptor_file = f"minimized_receptor.pdb"
 receptor_positions = receptor_simulation.context.getState(getPositions=True).getPositions()
 with open(temp_minimized_receptor_file, "w") as output:
     PDBFile.writeFile(receptor_modeller.topology, receptor_positions,output)
-    
 
-#%% RMSD and Rg calculation
-
-u1 = mda.Universe("initial_receptor.pdb")  
-u2 = mda.Universe("minimized_receptor.pdb")  
-
-# select only alpha carbons
-ca1 = u1.select_atoms("name CA")  
-ca2 = u2.select_atoms("name CA")  
-
-if len(ca1) != len(ca2):
-    raise ValueError("The two structures have different numbers of alpha carbons!")
-
-# align the two structures and calculate RMSD
-alignment = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-rmsd_value_3 = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-
-
-def radius_of_gyration(atoms):
-    """Calculate the radius of gyration for a set of atoms."""
-    positions = atoms.positions
-    center_of_mass = atoms.center_of_mass()
-    squared_distances = np.sum((positions - center_of_mass) ** 2, axis=1)
-    rg = np.sqrt(np.mean(squared_distances))
-    return rg
-
-# Calculate radius of gyration for both structures
-rg5 = radius_of_gyration(ca1)
-rg6 = radius_of_gyration(ca2)
 
 #%% NVT run of receptor system
 
@@ -498,74 +406,6 @@ with open("NVT_receptor.pdb", "w") as output:
 receptor_pdb = PDBFile("NVT_receptor.pdb")
 ligand_pdb = PDBFile("NVT_ligand.pdb")
 
-# Convert positions to numpy arrays in nanometers
-receptor_positions = np.array(receptor_pdb.positions.value_in_unit(nanometer))
-ligand_positions = np.array(ligand_pdb.positions.value_in_unit(nanometer))
-
-# Define desired COM positions in Ångströms
-desired_receptor_com_angstrom = np.array([52.32122, -28.905313, 65.79131])  # in Å
-desired_ligand_com_angstrom = np.array([56.025654, -2.9191, 74.42595])      # in Å
-
-# Convert desired COM positions to nanometers
-desired_receptor_com = desired_receptor_com_angstrom / 10.0  # Å to nm
-desired_ligand_com = desired_ligand_com_angstrom / 10.0      # Å to nm
-
-# Calculate current COMs
-receptor_com = np.mean(receptor_positions, axis=0)
-ligand_com = np.mean(ligand_positions, axis=0)
-
-
-# Get atom indices of residues 39–47
-residue_indices = []
-for res in receptor_pdb.topology.residues():
-    if 59 <=  int(res.id) <= 65:
-        for atom in res.atoms():
-            residue_indices.append(atom.index)
-
-# Compute COM of residues 39–47
-res_3947_positions = receptor_positions[residue_indices]
-com_3947 = np.mean(res_3947_positions, axis=0)
-
-# Define vectors
-v_rotate = com_3947 - receptor_com
-v_target = desired_ligand_com - desired_receptor_com
-
-# Normalize vectors
-v_rotate_norm = v_rotate / np.linalg.norm(v_rotate)
-v_target_norm = v_target / np.linalg.norm(v_target)
-
-# Compute rotation axis and angle
-rotation_axis = np.cross(v_rotate_norm, v_target_norm)
-rotation_angle = np.arccos(np.clip(np.dot(v_rotate_norm, v_target_norm), -1.0, 1.0))
-
-# Apply rotation only if necessary
-if np.linalg.norm(rotation_axis) > 1e-6:
-    rotation_axis /= np.linalg.norm(rotation_axis)
-    rot = R.from_rotvec(rotation_angle * rotation_axis)
-
-    # Translate receptor to origin, rotate, then translate back
-    receptor_positions_centered = receptor_positions - receptor_com
-    receptor_positions_rotated = rot.apply(receptor_positions_centered)
-    receptor_positions = receptor_positions_rotated + receptor_com
-
-# --- End rotation section ---
-
-# Recalculate current COMs after rotation
-receptor_com = np.mean(receptor_positions, axis=0)
-ligand_com = np.mean(ligand_positions, axis=0)
-
-# Compute translation vectors
-receptor_translation = desired_receptor_com - receptor_com
-ligand_translation = desired_ligand_com - ligand_com
-
-# Apply translations
-translated_receptor_positions = receptor_positions + receptor_translation
-translated_ligand_positions = ligand_positions + ligand_translation
-
-# Convert positions back to OpenMM units
-translated_receptor_positions = translated_receptor_positions * nanometer
-translated_ligand_positions = translated_ligand_positions * nanometer
-
 # Create Modeller object and combine receptor and ligand
 complex_modeller = Modeller(receptor_pdb.topology, translated_receptor_positions)
 complex_modeller.add(ligand_pdb.topology, translated_ligand_positions)
@@ -614,25 +454,6 @@ temp_minimized_complex_file = f"minimized_complex.pdb"
 complex_positions = complex_simulation.context.getState(getPositions=True).getPositions()
 with open(temp_minimized_complex_file, "w") as output:
     PDBFile.writeFile(complex_modeller.topology, complex_positions,output)
-    
-    
-#%% RMSD and Rg calculation of ligand in complex before and after minimization
-
-u1 = mda.Universe("initial_complex.pdb")  
-u2 = mda.Universe("minimized_complex.pdb")  
-
-# select alpha carbons of ligand in complex
-ca1 = u1.select_atoms("segid B and name CA")  
-ca2 = u2.select_atoms("segid B and name CA")  
-
-if len(ca1) != len(ca2):
-    raise ValueError("The two structures have different numbers of alpha carbons!")
-
-alignment = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-rmsd_value_5 = rms.rmsd(ca1.positions, ca2.positions, center=True, superposition=False)
-
-rg9 = radius_of_gyration(ca1)
-rg10 = radius_of_gyration(ca2)
 
 #%% NVT run of complex system
 
@@ -744,70 +565,3 @@ temp_NVT_complex_file = f"NVT_complex.pdb"
 complex_positions = complex_simulation.context.getState(getPositions=True).getPositions()
 with open(temp_NVT_complex_file, "w") as output:
     PDBFile.writeFile(complex_modeller.topology, complex_positions,output)
-
-#%% Alchemical calculations
-
-ligand_indices = [atom.index for atom in complex_modeller.topology.atoms() if atom.residue.chain.id == 'B']
-alchemical_region = AlchemicalRegion(alchemical_atoms=ligand_indices, annihilate_electrostatics=True, annihilate_sterics=True)
-
-# Use the AbsoluteAlchemicalFactory to transform the system
-factory = AbsoluteAlchemicalFactory(
-    consistent_exceptions=False,
-    disable_alchemical_dispersion_correction=True,  # matches theory in paper
-    alchemical_pme_treatment='exact',
-)
-alchemical_system = factory.create_alchemical_system(complex_system, alchemical_region)
-
-# Setup lambda protocol (default for absolute binding)
-lambda_protocol = {
-    "lambda_sterics": [0.0, 0.25, 0.5, 0.75, 1.0],
-    "lambda_electrostatics": [0.0, 0.5, 1.0]
-}
-
-# Construct thermodynamic states
-thermodynamic_states = []
-for lambda_sterics in lambda_protocol["lambda_sterics"]:
-    for lambda_electrostatics in lambda_protocol["lambda_electrostatics"]:
-        state = states.ThermodynamicState(system=alchemical_system, temperature=temperature)
-        alchemical_state = states.AlchemicalState.from_system(alchemical_system)
-        alchemical_state.lambda_sterics = lambda_sterics
-        alchemical_state.lambda_electrostatics = lambda_electrostatics
-        compound_state = states.CompoundThermodynamicState(thermodynamic_state=state, composable_states=[alchemical_state])
-        thermodynamic_states.append(compound_state)
-
-# Sampler setup
-sampler = mcmc.LangevinDynamicsMove(timestep=timestep, n_steps=1000, reassign_velocities=True, n_restart_attempts=3)
-
-# Reporter for logging
-reporter = multistate.MultiStateReporter("alchemical_output.nc", checkpoint_interval=10)
-
-# Simulation object
-simulation = multistate.ReplicaExchangeSampler(mcmc_moves=sampler, number_of_iterations=500)
-
-# Minimize complex before starting alchemical simulation
-context = Simulation(complex_modeller.topology, alchemical_system, LangevinIntegrator(temperature, collision_rate, timestep)).context
-context.setPositions(complex_modeller.positions)
-LocalEnergyMinimizer.minimize(context)
-positions = context.getState(getPositions=True).getPositions()
-
-# Create sampler states
-sampler_states = [states.SamplerState(positions=positions) for _ in thermodynamic_states]
-
-# Run simulation
-simulation.create(thermodynamic_states=thermodynamic_states,
-                  sampler_states=sampler_states,
-                  storage=reporter)
-simulation.run()
-    
-#%% delta G calculation
-
-# Reopen simulation data
-reporter = MultiStateReporter("alchemical_output.nc", open_mode="r")
-analyzer = ReplicaExchangeAnalyzer(reporter)
-
-# Extract ΔG and uncertainty
-dg_kT, ddg_kT = analyzer.get_free_energy()
-dg_kJmol = dg_kT * unit.MOLAR_GAS_CONSTANT_R * temperature
-dg_kJmol = dg_kJmol.value_in_unit(unit.kilojoule_per_mole)
-
-print(f"ΔG = {dg_kJmol[0]:.2f} ± {ddg_kT[0] * 2.479:.2f} kJ/mol")
