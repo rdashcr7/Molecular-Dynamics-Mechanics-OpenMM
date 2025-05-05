@@ -7,7 +7,7 @@ Created on Mon Mar 17 12:52:47 2025
 #%% Remember to have the Amber14 forcefield folder downlaoded in the same directory as this script.
 #%% Adjust the timestep, number of steps and sample interval to set the simulation time (25 ns in this code).
 #%% This code also computes various energy terms, Radius of gyration, end to end distance and Root Mean Square DEviation from the intial structure (ligand only in complex). 
-#%% For running in high performance clusters, slight tweaking might be needed such as not importin IPython. 
+#%% For running in high performance clusters, slight tweaking might be needed such as not importing IPython. 
 
 #%% Import all libraries
 
